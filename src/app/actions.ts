@@ -25,9 +25,9 @@ export async function loginAction(_state: { error: string }, formData: FormData)
   const email = String(formData.get("email"));
   const password = String(formData.get("password"));
   if (!["admin", "affiliate", "support"].includes(role)) return { error: t.unknownRole };
-  const account = validateDemoLogin(role, email, password);
+  const account = await validateDemoLogin(role, email, password);
   if (!account) return { error: t.invalidCredentials };
-  await setSession(createSessionValue(role, account.email, account.name));
+  await setSession(await createSessionValue(role, account.email, account.name));
   redirect(role === "affiliate" ? "/affiliate" : role === "support" ? "/admin/inbox" : "/admin");
 }
 

@@ -23,7 +23,7 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
-    command: `npx opennextjs-cloudflare preview -- --port 9401 --persist-to ${e2ePersistDirectory}`,
+    command: `npx opennextjs-cloudflare preview -- --port 9401 --persist-to ${e2ePersistDirectory} --var ALLOW_DEMO_AUTH:true`,
     url: "http://127.0.0.1:9401/login?role=admin",
     reuseExistingServer: false,
     timeout: 120_000,

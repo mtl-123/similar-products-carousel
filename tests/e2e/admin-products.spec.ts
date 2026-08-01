@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 test("administrator can edit, unpublish, and republish a product", async ({ page, request }) => {
   await page.goto("/login?role=admin");
   await expect(page.getByRole("heading", { name: "Workspace sign in" })).toBeVisible();
+  await page.locator('input[name="password"]').fill("northstar-admin");
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page).toHaveURL(/\/admin$/);
 

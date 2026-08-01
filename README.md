@@ -14,13 +14,15 @@ Open `http://127.0.0.1:9400`.
 
 Local development uses Cloudflare D1 and KV emulation under `.wrangler/`. The migration creates sample products, orders, a creator account and support conversations.
 
-## Demo accounts
+## Local demo accounts
 
 | Workspace | Email | Password |
 | --- | --- | --- |
 | Operations | `admin@northstar.demo` | `northstar-admin` |
 | Creator | `maya@northstar.demo` | `creator-demo` |
 | Support | `support@northstar.demo` | `support-demo` |
+
+Production passwords must be configured as the `ADMIN_PASSWORD`, `AFFILIATE_PASSWORD` and `SUPPORT_PASSWORD` Worker secrets. The login page never exposes or pre-fills passwords.
 
 ## Implemented workflows
 
@@ -49,6 +51,9 @@ npx wrangler kv namespace create northstar-product-uploads
 npm run db:migrate:remote
 npx wrangler secret put SESSION_SECRET
 npx wrangler secret put INBOUND_WEBHOOK_TOKEN
+npx wrangler secret put ADMIN_PASSWORD
+npx wrangler secret put AFFILIATE_PASSWORD
+npx wrangler secret put SUPPORT_PASSWORD
 npm run deploy
 ```
 
