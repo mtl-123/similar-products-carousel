@@ -1,0 +1,38 @@
+{
+  "name": "boss",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev:local": "next dev -H 127.0.0.1 -p 9400",
+    "build": "next build",
+    "start": "next start",
+    "start:local": "next start -H 127.0.0.1 -p 9400",
+    "lint": "eslint",
+    "check": "npm run lint && npm run build",
+    "test": "npm run test:e2e",
+    "pretest:e2e": "npm run build",
+    "test:e2e": "node tests/prepare-e2e.mjs && playwright test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.2",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.28.0",
+    "next": "16.2.12",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@tailwindcss/postcss": "^4",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.12",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
