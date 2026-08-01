@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "northstar-commerce",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "northstar-commerce",
+      "database_id": "af0de687-c5b2-4e96-8d84-c7f5ad80722a",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "UPLOADS",
+      "id": "d1356f6d3edc448dbbd9cc9368d9071f"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

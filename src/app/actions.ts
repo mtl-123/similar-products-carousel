@@ -1,23 +1,21 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { assertRole, clearSession, createSessionValue, setSession, type Role, validateDemoLogin } from "@/lib/auth";
 import { backofficeCopy } from "@/lib/backoffice-i18n";
-import { db, getSettings } from "@/lib/db";
+import { getDatabase, getSettings, getUploadsStore } from "@/lib/db";
 import type { Locale } from "@/lib/types";
 
 export async function setLocale(formData: FormData) {
   const locale = formData.get("locale") === "zh" ? "zh" : "en";
   const cookieOptions = { maxAge: 60 * 60 * 24 * 365, sameSite: "lax" as const, path: "/" };
-  const cookieStore = await cookies();
+  const [cookieStore, settings] = await Promise.all([cookies(), getSettings()]);
   cookieStore.set("northstar_locale", locale, cookieOptions);
-  cookieStore.set("northstar_locale_revision", getSettings().locale_revision || "0", cookieOptions);
+  cookieStore.set("northstar_locale_revision", settings.locale_revision || "0", cookieOptions);
 }
 
 export async function loginAction(_state: { error: string }, formData: FormData) {
@@ -77,11 +75,12 @@ async function storeProductImage(file: File) {
   const extension = imageTypes.get(file.type);
   if (!extension) throw new Error("Images must be JPEG, PNG, WebP or AVIF files.");
   if (file.size > maxImageBytes) throw new Error("Each product image must be 2 MB or smaller.");
-  const uploadDirectory = path.join(process.cwd(), "public", "uploads");
-  await mkdir(uploadDirectory, { recursive: true });
-  const fileName = `${Date.now()}-${randomUUID()}.${extension}`;
-  await writeFile(path.join(uploadDirectory, fileName), Buffer.from(await file.arrayBuffer()));
-  return `/uploads/${fileName}`;
+  const key = `products/${Date.now()}-${randomUUID()}.${extension}`;
+  const uploads = await getUploadsStore();
+  await uploads.put(key, await file.arrayBuffer(), {
+    metadata: { contentType: file.type, cacheControl: "public, max-age=31536000, immutable" },
+  });
+  return `/api/uploads/${key}`;
 }
 
 function parseDetailLines(value = "", maximum = 8) {
@@ -96,14 +95,14 @@ function parseSpecifications(value = "") {
   }).filter(([key]) => key));
 }
 
-function parseRelatedProductIds(formData: FormData, currentProductId?: number) {
+async function parseRelatedProductIds(formData: FormData, currentProductId?: number) {
   const submitted = z.array(z.coerce.number().int().positive()).max(12).parse(formData.getAll("related_product_ids"));
   const uniqueIds = [...new Set(submitted)].filter((id) => id !== currentProductId);
   if (!uniqueIds.length) return [];
-
+  const database = await getDatabase();
   const placeholders = uniqueIds.map(() => "?").join(", ");
-  const rows = db.prepare(`SELECT id FROM products WHERE id IN (${placeholders})`).all(...uniqueIds) as Array<{ id: number }>;
-  const existingIds = new Set(rows.map((row) => row.id));
+  const rows = await database.prepare(`SELECT id FROM products WHERE id IN (${placeholders})`).bind(...uniqueIds).all<{ id: number }>();
+  const existingIds = new Set(rows.results.map((row) => row.id));
   return uniqueIds.filter((id) => existingIds.has(id));
 }
 
@@ -127,10 +126,16 @@ function serializeProductContent(input: ProductInput) {
   return { attributes: JSON.stringify(attributes), details: JSON.stringify(details) };
 }
 
+function managedImageKey(image: string) {
+  const prefix = "/api/uploads/";
+  return image.startsWith(prefix) ? image.slice(prefix.length) : null;
+}
+
 async function removeManagedImages(images: string[]) {
-  await Promise.all(images.filter((image) => image.startsWith("/uploads/")).map((image) =>
-    unlink(path.join(process.cwd(), "public", "uploads", path.basename(image))).catch(() => undefined)
-  ));
+  const keys = images.map(managedImageKey).filter((key): key is string => Boolean(key));
+  if (!keys.length) return;
+  const uploads = await getUploadsStore();
+  await Promise.all(keys.map((key) => uploads.delete(key)));
 }
 
 export async function createProductAction(formData: FormData) {
@@ -140,25 +145,23 @@ export async function createProductAction(formData: FormData) {
   const parsedGalleryUrls = z.array(z.string().url()).max(8).parse(galleryUrls);
   const primaryFile = formData.get("image_file");
   const galleryFiles = formData.getAll("gallery_files").filter((value): value is File => value instanceof File && value.size > 0);
-  const relatedProductIds = parseRelatedProductIds(formData);
+  const relatedProductIds = await parseRelatedProductIds(formData);
   if (galleryFiles.length + parsedGalleryUrls.length > 8) throw new Error("A product can have up to eight gallery images.");
 
   const storedImages: string[] = [];
   try {
-    const primaryImage = primaryFile instanceof File && primaryFile.size > 0
-      ? await storeProductImage(primaryFile)
-      : input.image;
+    const primaryImage = primaryFile instanceof File && primaryFile.size > 0 ? await storeProductImage(primaryFile) : input.image;
     if (!primaryImage) throw new Error("Add a primary image file or image URL.");
-    if (primaryImage.startsWith("/uploads/")) storedImages.push(primaryImage);
-
-    const uploadedGallery = await Promise.all(galleryFiles.map((file) => storeProductImage(file)));
+    if (managedImageKey(primaryImage)) storedImages.push(primaryImage);
+    const uploadedGallery = await Promise.all(galleryFiles.map(storeProductImage));
     storedImages.push(...uploadedGallery);
     const content = serializeProductContent(input);
-
-    db.prepare(`INSERT INTO products
+    const database = await getDatabase();
+    await database.prepare(`INSERT INTO products
       (slug, sku, name_en, name_zh, description_en, description_zh, price, compare_at, inventory, status, category, image, gallery, attributes, details, related_product_ids, featured)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(input.slug, input.sku, input.name_en, input.name_zh, input.description_en, input.description_zh, input.price, input.compare_at || null, input.inventory, input.status, input.category, primaryImage, JSON.stringify([...uploadedGallery, ...parsedGalleryUrls]), content.attributes, content.details, JSON.stringify(relatedProductIds), input.featured === "on" ? 1 : 0);
+      .bind(input.slug, input.sku, input.name_en, input.name_zh, input.description_en, input.description_zh, input.price, input.compare_at || null, input.inventory, input.status, input.category, primaryImage, JSON.stringify([...uploadedGallery, ...parsedGalleryUrls]), content.attributes, content.details, JSON.stringify(relatedProductIds), input.featured === "on" ? 1 : 0)
+      .run();
   } catch (error) {
     await removeManagedImages(storedImages);
     throw error;
@@ -171,11 +174,8 @@ export async function createProductAction(formData: FormData) {
 export async function updateProductAction(formData: FormData) {
   await assertRole(["admin"]);
   const id = z.coerce.number().int().positive().parse(formData.get("id"));
-  const existing = db.prepare("SELECT * FROM products WHERE id = ?").get(id) as {
-    slug: string;
-    image: string;
-    gallery: string;
-  } | undefined;
+  const database = await getDatabase();
+  const existing = await database.prepare("SELECT slug, image, gallery FROM products WHERE id = ?").bind(id).first<{ slug: string; image: string; gallery: string }>();
   if (!existing) throw new Error("Product not found");
 
   const input = productSchema.parse(Object.fromEntries(formData));
@@ -185,29 +185,24 @@ export async function updateProductAction(formData: FormData) {
   const keptGallery = formData.getAll("keep_gallery").map(String).filter((image) => existingGallery.includes(image));
   const primaryFile = formData.get("image_file");
   const galleryFiles = formData.getAll("gallery_files").filter((value): value is File => value instanceof File && value.size > 0);
-  const relatedProductIds = parseRelatedProductIds(formData, id);
-  if (keptGallery.length + galleryFiles.length + parsedGalleryUrls.length > 8) {
-    throw new Error("A product can have up to eight gallery images.");
-  }
+  const relatedProductIds = await parseRelatedProductIds(formData, id);
+  if (keptGallery.length + galleryFiles.length + parsedGalleryUrls.length > 8) throw new Error("A product can have up to eight gallery images.");
 
   const storedImages: string[] = [];
   try {
-    const primaryImage = primaryFile instanceof File && primaryFile.size > 0
-      ? await storeProductImage(primaryFile)
-      : input.image || existing.image;
-    if (primaryImage.startsWith("/uploads/") && primaryImage !== existing.image) storedImages.push(primaryImage);
-    const uploadedGallery = await Promise.all(galleryFiles.map((file) => storeProductImage(file)));
+    const primaryImage = primaryFile instanceof File && primaryFile.size > 0 ? await storeProductImage(primaryFile) : input.image || existing.image;
+    if (managedImageKey(primaryImage) && primaryImage !== existing.image) storedImages.push(primaryImage);
+    const uploadedGallery = await Promise.all(galleryFiles.map(storeProductImage));
     storedImages.push(...uploadedGallery);
     const nextGallery = [...keptGallery, ...uploadedGallery, ...parsedGalleryUrls];
     const content = serializeProductContent(input);
-
-    db.prepare(`UPDATE products SET
+    await database.prepare(`UPDATE products SET
       slug = ?, sku = ?, name_en = ?, name_zh = ?, description_en = ?, description_zh = ?,
       price = ?, compare_at = ?, inventory = ?, status = ?, category = ?, image = ?,
       gallery = ?, attributes = ?, details = ?, related_product_ids = ?, featured = ?
       WHERE id = ?`)
-      .run(input.slug, input.sku, input.name_en, input.name_zh, input.description_en, input.description_zh, input.price, input.compare_at || null, input.inventory, input.status, input.category, primaryImage, JSON.stringify(nextGallery), content.attributes, content.details, JSON.stringify(relatedProductIds), input.featured === "on" ? 1 : 0, id);
-
+      .bind(input.slug, input.sku, input.name_en, input.name_zh, input.description_en, input.description_zh, input.price, input.compare_at || null, input.inventory, input.status, input.category, primaryImage, JSON.stringify(nextGallery), content.attributes, content.details, JSON.stringify(relatedProductIds), input.featured === "on" ? 1 : 0, id)
+      .run();
     const activeImages = new Set([primaryImage, ...nextGallery]);
     await removeManagedImages([existing.image, ...existingGallery].filter((image) => !activeImages.has(image)));
   } catch (error) {
@@ -226,10 +221,10 @@ export async function updateProductAction(formData: FormData) {
 export async function toggleProductStatusAction(formData: FormData) {
   await assertRole(["admin"]);
   const id = z.coerce.number().int().positive().parse(formData.get("id"));
-  const product = db.prepare("SELECT slug, status FROM products WHERE id = ?").get(id) as { slug: string; status: string } | undefined;
+  const database = await getDatabase();
+  const product = await database.prepare("SELECT slug, status FROM products WHERE id = ?").bind(id).first<{ slug: string; status: string }>();
   if (!product) throw new Error("Product not found");
-  const nextStatus = product.status === "active" ? "draft" : "active";
-  db.prepare("UPDATE products SET status = ? WHERE id = ?").run(nextStatus, id);
+  await database.prepare("UPDATE products SET status = ? WHERE id = ?").bind(product.status === "active" ? "draft" : "active", id).run();
   revalidatePath("/");
   revalidatePath("/admin");
   revalidatePath("/admin/products");
@@ -237,60 +232,53 @@ export async function toggleProductStatusAction(formData: FormData) {
   revalidatePath(`/product/${product.slug}`);
 }
 
+type CommissionRow = {
+  id: number;
+  affiliate_id: number;
+  amount: number;
+  base_amount: number;
+  status: string;
+  reversed_from_status: string | null;
+};
+
 export async function updateOrderStatusAction(formData: FormData) {
   await assertRole(["admin"]);
   const id = z.coerce.number().int().parse(formData.get("id"));
   const status = z.enum(["processing", "on-hold", "shipped", "completed", "refunded"]).parse(formData.get("status"));
-  const order = db.prepare("SELECT status FROM orders WHERE id = ?").get(id) as { status: string } | undefined;
+  const database = await getDatabase();
+  const [order, commission] = await Promise.all([
+    database.prepare("SELECT status FROM orders WHERE id = ?").bind(id).first<{ status: string }>(),
+    database.prepare("SELECT id, affiliate_id, amount, base_amount, status, reversed_from_status FROM commissions WHERE order_id = ?").bind(id).first<CommissionRow>(),
+  ]);
   if (!order) throw new Error("Order not found");
 
-  db.transaction(() => {
-    db.prepare("UPDATE orders SET status = ? WHERE id = ?").run(status, id);
-    const commission = db.prepare(`SELECT id, affiliate_id, amount, base_amount, status, reversed_from_status
-      FROM commissions WHERE order_id = ?`).get(id) as {
-        id: number;
-        affiliate_id: number;
-        amount: number;
-        base_amount: number;
-        status: string;
-        reversed_from_status: string | null;
-      } | undefined;
-    if (!commission) return;
-
+  const orderUpdate = await database.prepare("UPDATE orders SET status = ? WHERE id = ?").bind(status, id).run();
+  if (!orderUpdate.meta.changes) throw new Error("Order status was not updated");
+  const statements: D1PreparedStatement[] = [];
+  if (commission) {
     let commissionStatus = commission.status;
     if (order.status === "refunded" && status !== "refunded" && commissionStatus === "reversed") {
-      const restoredStatus = ["pending", "approved", "paid"].includes(commission.reversed_from_status || "")
-        ? commission.reversed_from_status as "pending" | "approved" | "paid"
-        : "pending";
-      db.prepare("UPDATE commissions SET status = ?, reversed_from_status = NULL WHERE id = ?").run(restoredStatus, commission.id);
-      if (restoredStatus === "pending") {
-        db.prepare("UPDATE affiliates SET pending_commission = pending_commission + ? WHERE id = ?").run(commission.amount, commission.affiliate_id);
-      } else {
-        db.prepare("UPDATE affiliates SET available_commission = available_commission + ? WHERE id = ?").run(commission.amount, commission.affiliate_id);
-      }
-      db.prepare("UPDATE affiliates SET conversions = conversions + 1, revenue = revenue + ? WHERE id = ?").run(commission.base_amount, commission.affiliate_id);
+      const restoredStatus = ["pending", "approved", "paid"].includes(commission.reversed_from_status || "") ? commission.reversed_from_status! : "pending";
+      statements.push(database.prepare("UPDATE commissions SET status = ?, reversed_from_status = NULL WHERE id = ?").bind(restoredStatus, commission.id));
+      statements.push(restoredStatus === "pending"
+        ? database.prepare("UPDATE affiliates SET pending_commission = pending_commission + ? WHERE id = ?").bind(commission.amount, commission.affiliate_id)
+        : database.prepare("UPDATE affiliates SET available_commission = available_commission + ? WHERE id = ?").bind(commission.amount, commission.affiliate_id));
+      statements.push(database.prepare("UPDATE affiliates SET conversions = conversions + 1, revenue = revenue + ? WHERE id = ?").bind(commission.base_amount, commission.affiliate_id));
       commissionStatus = restoredStatus;
     }
 
     if (status === "refunded" && order.status !== "refunded" && commissionStatus !== "reversed") {
-      db.prepare("UPDATE commissions SET status = 'reversed', reversed_from_status = ? WHERE id = ?").run(commissionStatus, commission.id);
-      if (commissionStatus === "pending") {
-        db.prepare("UPDATE affiliates SET pending_commission = pending_commission - ? WHERE id = ?").run(commission.amount, commission.affiliate_id);
-      } else {
-        db.prepare("UPDATE affiliates SET available_commission = available_commission - ? WHERE id = ?").run(commission.amount, commission.affiliate_id);
-      }
-      db.prepare("UPDATE affiliates SET conversions = MAX(0, conversions - 1), revenue = revenue - ? WHERE id = ?").run(commission.base_amount, commission.affiliate_id);
-      return;
+      statements.push(database.prepare("UPDATE commissions SET status = 'reversed', reversed_from_status = ? WHERE id = ?").bind(commissionStatus, commission.id));
+      statements.push(commissionStatus === "pending"
+        ? database.prepare("UPDATE affiliates SET pending_commission = pending_commission - ? WHERE id = ?").bind(commission.amount, commission.affiliate_id)
+        : database.prepare("UPDATE affiliates SET available_commission = available_commission - ? WHERE id = ?").bind(commission.amount, commission.affiliate_id));
+      statements.push(database.prepare("UPDATE affiliates SET conversions = MAX(0, conversions - 1), revenue = revenue - ? WHERE id = ?").bind(commission.base_amount, commission.affiliate_id));
+    } else if (status === "completed" && commissionStatus === "pending") {
+      statements.push(database.prepare("UPDATE commissions SET status = 'approved' WHERE id = ?").bind(commission.id));
+      statements.push(database.prepare("UPDATE affiliates SET pending_commission = pending_commission - ?, available_commission = available_commission + ? WHERE id = ?").bind(commission.amount, commission.amount, commission.affiliate_id));
     }
-
-    if (status === "completed" && commissionStatus === "pending") {
-      db.prepare("UPDATE commissions SET status = 'approved' WHERE id = ?").run(commission.id);
-      db.prepare(`UPDATE affiliates SET
-        pending_commission = pending_commission - ?,
-        available_commission = available_commission + ?
-        WHERE id = ?`).run(commission.amount, commission.amount, commission.affiliate_id);
-    }
-  })();
+  }
+  if (statements.length) await database.batch(statements);
   revalidatePath("/admin/orders");
   revalidatePath("/admin");
   revalidatePath("/admin/affiliates");
@@ -300,15 +288,14 @@ export async function updateOrderStatusAction(formData: FormData) {
 export async function payoutAffiliateAction(formData: FormData) {
   await assertRole(["admin"]);
   const id = z.coerce.number().int().parse(formData.get("id"));
-  db.transaction(() => {
-    const affiliate = db.prepare("SELECT available_commission FROM affiliates WHERE id = ?").get(id) as { available_commission: number } | undefined;
-    if (!affiliate || affiliate.available_commission <= 0) return;
-    db.prepare(`UPDATE affiliates SET
-      paid_commission = paid_commission + available_commission,
-      available_commission = 0
-      WHERE id = ?`).run(id);
-    db.prepare("UPDATE commissions SET status = 'paid' WHERE affiliate_id = ? AND status = 'approved'").run(id);
-  })();
+  const database = await getDatabase();
+  const affiliate = await database.prepare("SELECT available_commission FROM affiliates WHERE id = ?").bind(id).first<{ available_commission: number }>();
+  if (affiliate && affiliate.available_commission > 0) {
+    await database.batch([
+      database.prepare("UPDATE affiliates SET paid_commission = paid_commission + available_commission, available_commission = 0 WHERE id = ?").bind(id),
+      database.prepare("UPDATE commissions SET status = 'paid' WHERE affiliate_id = ? AND status = 'approved'").bind(id),
+    ]);
+  }
   revalidatePath("/admin/affiliates");
   revalidatePath("/affiliate");
 }
@@ -320,9 +307,9 @@ export async function updateAffiliateTermsAction(formData: FormData) {
     commission_rate: z.coerce.number().min(0).max(100),
     discount_rate: z.coerce.number().min(0).max(50),
   }).parse(Object.fromEntries(formData));
-  const result = db.prepare("UPDATE affiliates SET commission_rate = ?, discount_rate = ? WHERE id = ?")
-    .run(input.commission_rate, input.discount_rate, input.id);
-  if (!result.changes) throw new Error("Affiliate not found");
+  const database = await getDatabase();
+  const result = await database.prepare("UPDATE affiliates SET commission_rate = ?, discount_rate = ? WHERE id = ?").bind(input.commission_rate, input.discount_rate, input.id).run();
+  if (!result.meta.changes) throw new Error("Affiliate not found");
   revalidatePath("/admin/affiliates");
   revalidatePath("/affiliate");
 }
@@ -331,8 +318,11 @@ export async function replyTicketAction(formData: FormData) {
   const session = await assertRole(["admin", "support"]);
   const ticketId = z.coerce.number().int().parse(formData.get("ticket_id"));
   const body = z.string().min(2).parse(formData.get("body"));
-  db.prepare("INSERT INTO messages (ticket_id, sender, body) VALUES (?, ?, ?)").run(ticketId, session.name, body);
-  db.prepare("UPDATE tickets SET last_message = ?, status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(body, ticketId);
+  const database = await getDatabase();
+  await database.batch([
+    database.prepare("INSERT INTO messages (ticket_id, sender, body) VALUES (?, ?, ?)").bind(ticketId, session.name, body),
+    database.prepare("UPDATE tickets SET last_message = ?, status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(body, ticketId),
+  ]);
   revalidatePath("/admin/inbox");
 }
 
@@ -347,11 +337,12 @@ export async function updateSettingsAction(formData: FormData) {
     email_status: z.enum(["demo", "configured", "disabled"]),
     commission_cookie_days: z.coerce.number().int().min(1).max(365).transform(String),
   }).parse(Object.fromEntries(formData));
-  const upsert = db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
-  db.transaction(() => {
-    Object.entries(input).forEach(([key, value]) => upsert.run(key, value));
-    upsert.run("locale_revision", randomUUID());
-  })();
+  const database = await getDatabase();
+  const upsert = "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value";
+  await database.batch([
+    ...Object.entries(input).map(([key, value]) => database.prepare(upsert).bind(key, value)),
+    database.prepare(upsert).bind("locale_revision", randomUUID()),
+  ]);
   revalidatePath("/admin/settings");
   revalidatePath("/", "layout");
 }
@@ -363,9 +354,9 @@ export async function createTicketAction(formData: FormData) {
     subject: z.string().min(3),
     message: z.string().min(10),
   }).parse(Object.fromEntries(formData));
-  db.prepare(`INSERT INTO tickets (customer_name, customer_email, subject, channel, priority, last_message)
-    VALUES (?, ?, ?, 'web', 'normal', ?)`)
-    .run(input.customer_name, input.customer_email, input.subject, input.message);
+  const database = await getDatabase();
+  await database.prepare("INSERT INTO tickets (customer_name, customer_email, subject, channel, priority, last_message) VALUES (?, ?, ?, 'web', 'normal', ?)")
+    .bind(input.customer_name, input.customer_email, input.subject, input.message).run();
   redirect("/support?sent=1");
 }
 
@@ -378,24 +369,29 @@ export async function placeOrderAction(formData: FormData) {
     affiliate_code: z.string().trim().max(40).optional(),
     items: z.string(),
   }).parse(Object.fromEntries(formData));
-  const settings = getSettings();
+  const settings = await getSettings();
   const stripeMethods = new Set(["stripe", "apple-pay", "ach"]);
   if ((stripeMethods.has(input.payment_method) && settings.stripe_mode === "disabled") || (input.payment_method === "paypal" && settings.paypal_mode === "disabled")) {
     throw new Error("The selected payment method is unavailable.");
   }
+
+  const database = await getDatabase();
   const cookieStore = await cookies();
   const cookieCode = cookieStore.get("northstar_affiliate")?.value?.trim().toUpperCase() || "";
   const requestedCode = input.affiliate_code?.trim().toUpperCase() || cookieCode;
   const affiliate = requestedCode
-    ? db.prepare("SELECT id, code, commission_rate, discount_rate FROM affiliates WHERE code = ? AND status = 'active'").get(requestedCode) as { id: number; code: string; commission_rate: number; discount_rate: number } | undefined
-    : undefined;
+    ? await database.prepare("SELECT id, code, commission_rate, discount_rate FROM affiliates WHERE code = ? AND status = 'active'").bind(requestedCode).first<{ id: number; code: string; commission_rate: number; discount_rate: number }>()
+    : null;
   const affiliateCode = affiliate?.code || null;
   const cart = z.array(z.object({ id: z.number().int(), quantity: z.number().int().positive().max(20) })).parse(JSON.parse(input.items));
   if (!cart.length) throw new Error("Cart is empty");
-  const productStatement = db.prepare("SELECT id, name_en, price, inventory FROM products WHERE id = ? AND status = 'active'");
+  const productResults = await database.batch<{ id: number; name_en: string; price: number; inventory: number }>(
+    cart.map((item) => database.prepare("SELECT id, name_en, price, inventory FROM products WHERE id = ? AND status = 'active'").bind(item.id)),
+  );
+
   let subtotal = 0;
-  const verifiedItems = cart.map((item) => {
-    const product = productStatement.get(item.id) as { id: number; name_en: string; price: number; inventory: number } | undefined;
+  const verifiedItems = cart.map((item, index) => {
+    const product = productResults[index].results[0];
     if (!product || product.inventory < item.quantity) throw new Error("A product is unavailable");
     subtotal += product.price * item.quantity;
     return { ...item, name: product.name_en, price: product.price };
@@ -408,25 +404,23 @@ export async function placeOrderAction(formData: FormData) {
   const total = roundMoney(commissionBase + shipping);
   const attributedProductValue = affiliateCode === cookieCode ? Number(cookieStore.get("northstar_affiliate_product")?.value) : NaN;
   const attributedProduct = Number.isInteger(attributedProductValue)
-    ? db.prepare("SELECT id FROM products WHERE id = ?").get(attributedProductValue) as { id: number } | undefined
-    : undefined;
-  const campaign = affiliateCode === cookieCode
-    ? cookieStore.get("northstar_affiliate_campaign")?.value?.slice(0, 64) || null
+    ? await database.prepare("SELECT id FROM products WHERE id = ?").bind(attributedProductValue).first<{ id: number }>()
     : null;
+  const campaign = affiliateCode === cookieCode ? cookieStore.get("northstar_affiliate_campaign")?.value?.slice(0, 64) || null : null;
   const orderNo = `NS-${Date.now().toString(36).slice(-6).toUpperCase()}${randomUUID().slice(0, 2).toUpperCase()}`;
-  const transaction = db.transaction(() => {
-    const result = db.prepare(`INSERT INTO orders
+  const statements: D1PreparedStatement[] = [
+    database.prepare(`INSERT INTO orders
       (order_no, customer_name, customer_email, total, subtotal, discount, shipping, status, payment_method, affiliate_code, attribution_product_id, affiliate_campaign, shipping_address, items)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?)`)
-      .run(orderNo, input.customer_name, input.customer_email, total, subtotal, discount, shipping, input.payment_method, affiliateCode, attributedProduct?.id || null, campaign, input.shipping_address, JSON.stringify(verifiedItems));
-    verifiedItems.forEach((item) => db.prepare("UPDATE products SET inventory = inventory - ? WHERE id = ?").run(item.quantity, item.id));
-    if (affiliate) {
-      const commission = roundMoney(commissionBase * (affiliate.commission_rate / 100));
-      db.prepare("INSERT INTO commissions (affiliate_id, order_id, amount, base_amount) VALUES (?, ?, ?, ?)").run(affiliate.id, result.lastInsertRowid, commission, commissionBase);
-      db.prepare(`UPDATE affiliates SET conversions = conversions + 1, revenue = revenue + ?, pending_commission = pending_commission + ? WHERE id = ?`).run(commissionBase, commission, affiliate.id);
-    }
-  });
-  transaction();
+      .bind(orderNo, input.customer_name, input.customer_email, total, subtotal, discount, shipping, input.payment_method, affiliateCode, attributedProduct?.id || null, campaign, input.shipping_address, JSON.stringify(verifiedItems)),
+    ...verifiedItems.map((item) => database.prepare("UPDATE products SET inventory = inventory - ? WHERE id = ? AND inventory >= ?").bind(item.quantity, item.id, item.quantity)),
+  ];
+  if (affiliate) {
+    const commission = roundMoney(commissionBase * (affiliate.commission_rate / 100));
+    statements.push(database.prepare("INSERT INTO commissions (affiliate_id, order_id, amount, base_amount) SELECT ?, id, ?, ? FROM orders WHERE order_no = ?").bind(affiliate.id, commission, commissionBase, orderNo));
+    statements.push(database.prepare("UPDATE affiliates SET conversions = conversions + 1, revenue = revenue + ?, pending_commission = pending_commission + ? WHERE id = ?").bind(commissionBase, commission, affiliate.id));
+  }
+  await database.batch(statements);
   revalidatePath("/admin/orders");
   redirect(`/checkout/success?order=${orderNo}`);
 }

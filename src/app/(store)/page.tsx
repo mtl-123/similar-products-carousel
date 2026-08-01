@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const locale = await getStoreLocale();
   const t = copy[locale];
-  const products = getProducts({ featured: true, activeOnly: true }).slice(0, 4);
+  const products = (await getProducts({ featured: true, activeOnly: true })).slice(0, 4);
   const benefits = [
     { icon: PackageCheck, title: t.deliveryTitle, body: t.deliveryBody },
     { icon: RefreshCcw, title: t.returnsTitle, body: t.returnsBody },

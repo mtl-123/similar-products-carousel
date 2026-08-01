@@ -41,7 +41,7 @@ export function ProductGallery({ images, name, imageLabel }: { images: string[];
               onClick={() => setSelectedIndex(index)}
               className={`product-gallery-thumbnail relative z-0 size-16 shrink-0 cursor-pointer overflow-hidden rounded-[4px] border-2 bg-[#eeeef0] hover:z-10 md:size-auto md:aspect-square md:w-[72px] ${isSelected ? "border-[var(--foreground)]" : "border-transparent hover:border-[#a7aaa6]"}`}
             >
-              <Image src={item.src} alt="" fill sizes="76px" className="object-cover" style={{ objectPosition: item.position }} />
+              <Image src={item.src} alt="" fill unoptimized={item.src.startsWith("/api/uploads/")} sizes="76px" className="object-cover" style={{ objectPosition: item.position }} />
             </button>
           );
         })}
@@ -54,6 +54,7 @@ export function ProductGallery({ images, name, imageLabel }: { images: string[];
             src={selected.src}
             alt={`${name} - ${imageLabel} ${selectedIndex + 1}`}
             fill
+            unoptimized={selected.src.startsWith("/api/uploads/")}
             priority={selectedIndex === 0}
             sizes="(max-width: 1024px) 100vw, 55vw"
             className="product-gallery-main-image object-cover"

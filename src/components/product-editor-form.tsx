@@ -76,7 +76,7 @@ export function ProductEditorForm({ locale, product, products, action }: {
               <div className="mt-5">
                 <span className="label">{t.currentPrimaryImage}</span>
                 <div className="relative aspect-[16/9] max-w-sm overflow-hidden rounded-[4px] border bg-[#eeeef0]">
-                  <Image src={product.image} alt={product.name_en} fill sizes="384px" className="object-cover" />
+                  <Image src={product.image} alt={product.name_en} fill unoptimized={product.image.startsWith("/api/uploads/")} sizes="384px" className="object-cover" />
                 </div>
               </div>
             )}
@@ -91,7 +91,7 @@ export function ProductEditorForm({ locale, product, products, action }: {
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   {gallery.map((image, index) => (
                     <label key={`${image}-${index}`} className="relative aspect-square cursor-pointer overflow-hidden rounded-[4px] border bg-[#eeeef0]">
-                      <Image src={image} alt="" fill sizes="160px" className="object-cover" />
+                      <Image src={image} alt="" fill unoptimized={image.startsWith("/api/uploads/")} sizes="160px" className="object-cover" />
                       <span className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-black/75 px-2 py-2 text-[11px] font-semibold text-white">
                         <input type="checkbox" name="keep_gallery" value={image} defaultChecked />{t.keepImage}
                       </span>
@@ -142,7 +142,7 @@ export function ProductEditorForm({ locale, product, products, action }: {
                   return (
                     <label key={candidate.id} className="flex cursor-pointer items-center gap-3 border-b p-3 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0">
                       <input type="checkbox" name="related_product_ids" value={candidate.id} defaultChecked={selectedRelatedProducts.has(candidate.id)} className="size-4 shrink-0" />
-                      <span className="relative size-12 shrink-0 overflow-hidden rounded-[4px] bg-[#eeeef0]"><Image src={candidate.image} alt="" fill sizes="48px" className="object-cover" /></span>
+                      <span className="relative size-12 shrink-0 overflow-hidden rounded-[4px] bg-[#eeeef0]"><Image src={candidate.image} alt="" fill unoptimized={candidate.image.startsWith("/api/uploads/")} sizes="48px" className="object-cover" /></span>
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-semibold">{candidateName}</span>
                         <span className="mt-0.5 block text-xs text-[var(--muted)]">{candidate.sku} · {status}</span>

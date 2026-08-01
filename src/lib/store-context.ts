@@ -5,7 +5,7 @@ import { getSettings } from "@/lib/db";
 import type { Locale } from "@/lib/types";
 
 export async function getStoreContext() {
-  const settings = getSettings();
+  const settings = await getSettings();
   const cookieStore = await cookies();
   const selectedLocale = cookieStore.get("northstar_locale")?.value;
   const selectedRevision = cookieStore.get("northstar_locale_revision")?.value;
@@ -24,6 +24,6 @@ export async function getStoreLocale() {
   return (await getStoreContext()).locale;
 }
 
-export function getBackofficeLocale() {
-  return (getSettings().default_locale === "zh" ? "zh" : "en") as Locale;
+export async function getBackofficeLocale() {
+  return ((await getSettings()).default_locale === "zh" ? "zh" : "en") as Locale;
 }

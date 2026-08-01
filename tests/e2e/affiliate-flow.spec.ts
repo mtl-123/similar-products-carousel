@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import Database from "better-sqlite3";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -18,6 +19,13 @@ async function submitCheckout(page: Page, email: string) {
   await expect(page).toHaveURL(/\/checkout\/success\?order=/);
 }
 
+function getD1DatabasePath() {
+  const directory = path.join(process.cwd(), process.env.E2E_PERSIST_DIR || ".wrangler-e2e", "v3", "d1", "miniflare-D1DatabaseObject");
+  const file = fs.readdirSync(directory).find((name) => name.endsWith(".sqlite") && name !== "metadata.sqlite");
+  if (!file) throw new Error("E2E D1 database file was not created");
+  return path.join(directory, file);
+}
+
 test("deep links, discount codes, net commission, approval, and refunds stay consistent", async ({ browser }) => {
   const adminContext = await browser.newContext();
   const adminPage = await adminContext.newPage();
@@ -32,7 +40,7 @@ test("deep links, discount codes, net commission, approval, and refunds stay con
   await expect(termsForm.locator('input[name="commission_rate"]')).toHaveValue("15");
   await expect(termsForm.locator('input[name="discount_rate"]')).toHaveValue("5");
 
-  const database = new Database(path.join(process.cwd(), ".data-e2e", "northstar.db"), { readonly: true, fileMustExist: true });
+  const database = new Database(getD1DatabasePath(), { readonly: true, fileMustExist: true });
   const baseline = database.prepare("SELECT conversions, revenue, pending_commission, available_commission FROM affiliates WHERE code = 'MAYA20'").get() as {
     conversions: number;
     revenue: number;
@@ -110,14 +118,17 @@ test("deep links, discount codes, net commission, approval, and refunds stay con
   let orderRow = adminPage.locator(`[data-order-no="${deepOrder.order_no}"]`);
   await orderRow.locator('select[name="status"]').selectOption("completed");
   await orderRow.locator("button").click();
+  await expect.poll(() => (database.prepare("SELECT status FROM orders WHERE id = ?").get(deepOrder.id) as { status: string }).status).toBe("completed");
   await expect.poll(() => (database.prepare("SELECT status FROM commissions WHERE order_id = ?").get(deepOrder.id) as { status: string }).status).toBe("approved");
   affiliate = database.prepare("SELECT conversions, revenue, pending_commission, available_commission FROM affiliates WHERE code = 'MAYA20'").get() as typeof baseline;
   expect(affiliate.pending_commission).toBeCloseTo(baseline.pending_commission);
   expect(affiliate.available_commission).toBeCloseTo(baseline.available_commission + 33.92);
 
+  await adminPage.reload();
   orderRow = adminPage.locator(`[data-order-no="${deepOrder.order_no}"]`);
   await orderRow.locator('select[name="status"]').selectOption("refunded");
   await orderRow.locator("button").click();
+  await expect.poll(() => (database.prepare("SELECT status FROM orders WHERE id = ?").get(deepOrder.id) as { status: string }).status).toBe("refunded");
   await expect.poll(() => (database.prepare("SELECT status FROM commissions WHERE order_id = ?").get(deepOrder.id) as { status: string }).status).toBe("reversed");
   commission = database.prepare("SELECT amount, base_amount, status, reversed_from_status FROM commissions WHERE order_id = ?").get(deepOrder.id) as typeof commission;
   expect(commission.status).toBe("reversed");

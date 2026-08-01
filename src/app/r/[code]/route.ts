@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { db, getSettings } from "@/lib/db";
+import { getDatabase, getSettings } from "@/lib/db";
 
-function resolveDestination(requestUrl: URL) {
+async function resolveDestination(requestUrl: URL) {
   const requested = requestUrl.searchParams.get("to") || "/";
   if (requested === "/" || requested === "/shop") {
     return { path: requested, productId: null as number | null };
@@ -9,7 +9,8 @@ function resolveDestination(requestUrl: URL) {
 
   const match = requested.match(/^\/product\/([a-z0-9-]+)$/);
   if (!match) return { path: "/", productId: null as number | null };
-  const product = db.prepare("SELECT id, slug FROM products WHERE slug = ? AND status = 'active'").get(match[1]) as { id: number; slug: string } | undefined;
+  const database = await getDatabase();
+  const product = await database.prepare("SELECT id, slug FROM products WHERE slug = ? AND status = 'active'").bind(match[1]).first<{ id: number; slug: string }>();
   return product
     ? { path: `/product/${product.slug}`, productId: product.id }
     : { path: "/", productId: null as number | null };
@@ -31,23 +32,24 @@ export async function GET(request: Request, context: RouteContext<"/r/[code]">) 
   const requestUrl = new URL(request.url);
   const { code: rawCode } = await context.params;
   const code = rawCode.trim().toUpperCase();
-  const destination = resolveDestination(requestUrl);
+  const destination = await resolveDestination(requestUrl);
   const publicOrigin = resolvePublicOrigin(request, requestUrl);
   const response = NextResponse.redirect(new URL(destination.path, publicOrigin));
-  const affiliate = db.prepare("SELECT id FROM affiliates WHERE code = ? AND status = 'active'").get(code) as { id: number } | undefined;
+  const database = await getDatabase();
+  const affiliate = await database.prepare("SELECT id FROM affiliates WHERE code = ? AND status = 'active'").bind(code).first<{ id: number }>();
   if (!affiliate) return response;
 
-  const configuredDays = Number(getSettings().commission_cookie_days);
+  const configuredDays = Number((await getSettings()).commission_cookie_days);
   const cookieDays = Number.isFinite(configuredDays) ? Math.min(365, Math.max(1, Math.round(configuredDays))) : 30;
   const maxAge = 60 * 60 * 24 * cookieDays;
   const campaignValue = requestUrl.searchParams.get("campaign")?.trim().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
   const campaign = campaignValue || null;
 
-  db.transaction(() => {
-    db.prepare("UPDATE affiliates SET clicks = clicks + 1 WHERE id = ?").run(affiliate.id);
-    db.prepare("INSERT INTO affiliate_clicks (affiliate_id, destination, product_id, campaign) VALUES (?, ?, ?, ?)")
-      .run(affiliate.id, destination.path, destination.productId, campaign);
-  })();
+  await database.batch([
+    database.prepare("UPDATE affiliates SET clicks = clicks + 1 WHERE id = ?").bind(affiliate.id),
+    database.prepare("INSERT INTO affiliate_clicks (affiliate_id, destination, product_id, campaign) VALUES (?, ?, ?, ?)")
+      .bind(affiliate.id, destination.path, destination.productId, campaign),
+  ]);
 
   const cookieOptions = {
     maxAge,

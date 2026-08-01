@@ -6,6 +6,6 @@ import { ProductEditorForm } from "@/components/product-editor-form";
 
 export default async function NewProductPage() {
   await requireRole(["admin"]);
-  const locale = getBackofficeLocale();
-  return <ProductEditorForm locale={locale} products={getProducts()} action={createProductAction} />;
+  const [locale, products] = await Promise.all([getBackofficeLocale(), getProducts()]);
+  return <ProductEditorForm locale={locale} products={products} action={createProductAction} />;
 }

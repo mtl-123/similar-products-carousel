@@ -11,8 +11,9 @@ export default async function EditProductPage({ params }: PageProps<"/admin/prod
   await requireRole(["admin"]);
   const id = Number((await params).id);
   if (!Number.isInteger(id) || id < 1) notFound();
-  const product = getProductById(id);
+  const product = await getProductById(id);
   if (!product) notFound();
 
-  return <ProductEditorForm locale={getBackofficeLocale()} product={product} products={getProducts()} action={updateProductAction} />;
+  const [locale, products] = await Promise.all([getBackofficeLocale(), getProducts()]);
+  return <ProductEditorForm locale={locale} product={product} products={products} action={updateProductAction} />;
 }

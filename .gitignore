@@ -18,6 +18,9 @@
 
 # next.js
 /.next/
+/.open-next/
+/.wrangler/
+/.wrangler-e2e*/
 /out/
 
 # production
@@ -41,6 +44,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
+!.dev.vars.example
 
 # vercel
 .vercel

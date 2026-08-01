@@ -9,7 +9,7 @@ export default async function ShopPage({ searchParams }: PageProps<"/shop">) {
   const locale = await getStoreLocale();
   const t = copy[locale];
   const category = (await searchParams).category;
-  const all = getProducts({ activeOnly: true });
+  const all = await getProducts({ activeOnly: true });
   const products = typeof category === "string" ? all.filter((product) => product.category === category) : all;
   const categories = [...new Set(all.map((product) => product.category))];
   return (

@@ -11,8 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AffiliatesPage() {
   await requireRole(["admin"]);
-  const affiliates = getAffiliates();
-  const locale = getBackofficeLocale();
+  const [affiliates, locale] = await Promise.all([getAffiliates(), getBackofficeLocale()]);
   const t = backofficeCopy[locale];
 
   return (

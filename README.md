@@ -6,12 +6,13 @@ Custom bilingual commerce MVP for a US-focused independent store. The applicatio
 
 ```powershell
 npm install
+npm run db:migrate:local
 npm run dev:local
 ```
 
 Open `http://127.0.0.1:9400`.
 
-The SQLite database is created automatically in `.data/northstar.db` with sample products, orders, a creator account and support conversations.
+Local development uses Cloudflare D1 and KV emulation under `.wrangler/`. The migration creates sample products, orders, a creator account and support conversations.
 
 ## Demo accounts
 
@@ -25,7 +26,7 @@ The SQLite database is created automatically in `.data/northstar.db` with sample
 
 - English and Simplified Chinese storefront content
 - Product catalog, categories, inventory and bilingual product creation
-- Local image uploads, multi-image galleries, product attributes and featured merchandising
+- Cloudflare KV image uploads, multi-image galleries, product attributes and featured merchandising
 - Admin-configured similar-product recommendations with responsive storefront carousels
 - Persistent cart and server-verified checkout totals
 - Stripe, PayPal, Apple Pay and ACH provider slots with sandbox status
@@ -37,12 +38,28 @@ The SQLite database is created automatically in `.data/northstar.db` with sample
 - Inbound webhooks at `/api/email/inbound` and `/api/chatwoot/webhook`
 - Role-based signed local sessions
 
-## Production integrations
+## Cloudflare deployment
 
-Copy `.env.example` to `.env.local` and provide production secrets. The current payment and outbound messaging handoffs remain in demo mode until provider credentials and merchant-specific redirect/webhook behavior are configured. Product files are stored in `public/uploads` for local use; production deployments should move uploads to S3, R2 or equivalent object storage. Use PostgreSQL or MySQL instead of SQLite for multi-instance production deployments.
+The production runtime is OpenNext on Cloudflare Workers, with D1 for commerce data and KV for product images.
+
+```powershell
+npx wrangler login
+npx wrangler d1 create northstar-commerce --location enam
+npx wrangler kv namespace create northstar-product-uploads
+npm run db:migrate:remote
+npx wrangler secret put SESSION_SECRET
+npx wrangler secret put INBOUND_WEBHOOK_TOKEN
+npm run deploy
+```
+
+After creating D1, place its database ID in `wrangler.jsonc`. Keep `cloudflare-env.d.ts` aligned whenever bindings change.
+
+Stripe, PayPal, Apple Pay, ACH, outbound email and Chatwoot are currently merchant integration slots and demo workflows. Before accepting real payments or sending messages, configure the provider credentials and implement provider-specific checkout, webhook verification and delivery handling.
 
 ## Verification
 
 ```powershell
 npm run check
+npm run test:e2e
+npm run preview
 ```

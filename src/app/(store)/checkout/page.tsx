@@ -6,10 +6,10 @@ import { getStoreLocale } from "@/lib/store-context";
 
 export default async function CheckoutPage() {
   const affiliateCode = (await cookies()).get("northstar_affiliate")?.value;
-  const affiliate = affiliateCode ? getAffiliate(affiliateCode) : undefined;
+  const affiliate = affiliateCode ? await getAffiliate(affiliateCode) : undefined;
   const locale = await getStoreLocale();
   const t = copy[locale];
-  const settings = getSettings();
+  const settings = await getSettings();
   const enabledMethods = [
     ...(settings.stripe_mode === "disabled" ? [] : ["stripe", "apple-pay", "ach"] as const),
     ...(settings.paypal_mode === "disabled" ? [] : ["paypal"] as const),

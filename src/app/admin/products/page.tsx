@@ -13,8 +13,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ProductsPage() {
   await requireRole(["admin"]);
-  const products = getProducts();
-  const locale = getBackofficeLocale();
+  const [products, locale] = await Promise.all([getProducts(), getBackofficeLocale()]);
   const t = backofficeCopy[locale];
 
   return (
@@ -41,7 +40,7 @@ export default async function ProductsPage() {
                   <tr key={product.id} className="hover:bg-[#fafaf8]">
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="relative size-12 overflow-hidden rounded-[4px] bg-gray-100"><Image src={product.image} alt="" fill sizes="48px" className="object-cover" /></div>
+                        <div className="relative size-12 overflow-hidden rounded-[4px] bg-gray-100"><Image src={product.image} alt="" fill unoptimized={product.image.startsWith("/api/uploads/")} sizes="48px" className="object-cover" /></div>
                         <div><div className="font-bold">{locale === "zh" ? product.name_zh : product.name_en}</div><div className="text-xs text-[var(--muted)]">{locale === "zh" ? product.name_en : product.name_zh}</div></div>
                       </div>
                     </td>

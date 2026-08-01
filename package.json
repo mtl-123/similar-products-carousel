@@ -6,16 +6,20 @@
     "dev": "next dev",
     "dev:local": "next dev -H 127.0.0.1 -p 9400",
     "build": "next build",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "db:migrate:local": "wrangler d1 migrations apply northstar-commerce --local",
+    "db:migrate:remote": "wrangler d1 migrations apply northstar-commerce --remote",
     "start": "next start",
     "start:local": "next start -H 127.0.0.1 -p 9400",
     "lint": "eslint",
     "check": "npm run lint && npm run build",
     "test": "npm run test:e2e",
-    "pretest:e2e": "npm run build",
+    "pretest:e2e": "opennextjs-cloudflare build",
     "test:e2e": "node tests/prepare-e2e.mjs && playwright test"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.2",
+    "@opennextjs/cloudflare": "^1.20.2",
     "clsx": "^2.1.1",
     "lucide-react": "^1.28.0",
     "next": "16.2.12",
@@ -24,15 +28,18 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260801.1",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "better-sqlite3": "^13.0.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.118.0"
   }
 }

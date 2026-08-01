@@ -11,8 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function OrdersPage() {
   await requireRole(["admin"]);
-  const orders = getOrders();
-  const locale = getBackofficeLocale();
+  const [orders, locale] = await Promise.all([getOrders(), getBackofficeLocale()]);
   const t = backofficeCopy[locale];
 
   return (

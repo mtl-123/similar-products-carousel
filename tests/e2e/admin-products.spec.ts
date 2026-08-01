@@ -25,6 +25,11 @@ test("administrator can edit, unpublish, and republish a product", async ({ page
   await page.locator('textarea[name="specifications_en"]').fill("Storage: 128 GB\nVideo output: 4K");
   await page.locator('textarea[name="specifications_zh"]').fill("存储空间: 128 GB\n视频输出: 4K");
   await page.locator('textarea[name="box_contents_en"]').fill("Device\nRemote control\nPower adapter");
+  await page.locator('input[name="image_file"]').setInputFiles({
+    name: "automated-product.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XxL0AAAAAElFTkSuQmCC", "base64"),
+  });
   await page.locator('textarea[name="box_contents_zh"]').fill("主机\n遥控器\n电源适配器");
   const relatedEditor = page.getByTestId("related-products-editor");
   await relatedEditor.getByRole("checkbox", { name: /山脊数码收纳包/ }).check();
@@ -35,6 +40,9 @@ test("administrator can edit, unpublish, and republish a product", async ({ page
 
   productRow = page.getByRole("row").filter({ hasText: "自动化测试登机箱" });
   await expect(productRow).toContainText("27");
+  const uploadedImage = productRow.locator("img");
+  await expect(uploadedImage).toBeVisible();
+  await expect.poll(() => uploadedImage.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await productRow.getByRole("link", { name: "修改" }).click();
   await expect(page.getByTestId("related-products-editor").getByRole("checkbox", { name: /山脊数码收纳包/ })).toBeChecked();
   await expect(page.getByTestId("related-products-editor").getByRole("checkbox", { name: /城市通勤斜挎包/ })).toBeChecked();

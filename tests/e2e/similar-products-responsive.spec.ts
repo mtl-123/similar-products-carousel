@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 async function verifyCarouselLayout(page: Page, section: Locator) {
   const track = section.getByTestId("similar-products-track");
+  const controls = section.getByTestId("similar-products-controls");
   const cards = section.locator("[data-related-product-id]");
   await expect(cards.first()).toBeVisible();
   expect(await track.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
@@ -9,8 +10,14 @@ async function verifyCarouselLayout(page: Page, section: Locator) {
 
   const first = await cards.nth(0).boundingBox();
   const second = await cards.nth(1).boundingBox();
+  const controlsBox = await controls.boundingBox();
+  const viewport = page.viewportSize();
   expect(first).not.toBeNull();
   expect(second).not.toBeNull();
+  expect(controlsBox).not.toBeNull();
+  expect(first?.x || 0).toBeGreaterThanOrEqual(0);
+  expect(controlsBox?.x || 0).toBeGreaterThanOrEqual(0);
+  expect((controlsBox?.x || 0) + (controlsBox?.width || 0)).toBeLessThanOrEqual(viewport?.width || 0);
   expect((first?.x || 0) + (first?.width || 0)).toBeLessThanOrEqual(second?.x || 0);
 }
 

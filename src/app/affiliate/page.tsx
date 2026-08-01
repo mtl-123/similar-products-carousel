@@ -13,13 +13,13 @@ export const dynamic = "force-dynamic";
 
 export default async function AffiliatePage() {
   await requireRole(["affiliate"]);
-  const affiliate = getAffiliate();
+  const affiliate = await getAffiliate();
   if (!affiliate) return null;
-  const commissions = getCommissions(affiliate.id);
+  const commissions = await getCommissions(affiliate.id);
   const conversionRate = affiliate.clicks ? (affiliate.conversions / affiliate.clicks) * 100 : 0;
-  const locale = getBackofficeLocale();
+  const locale = await getBackofficeLocale();
   const t = backofficeCopy[locale];
-  const products = getProducts({ activeOnly: true }).map((product) => ({ slug: product.slug, name: localizeProduct(product, locale).name }));
+  const products = (await getProducts({ activeOnly: true })).map((product) => ({ slug: product.slug, name: localizeProduct(product, locale).name }));
   const requestHeaders = await headers();
   const host = requestHeaders.get("x-forwarded-host") || requestHeaders.get("host") || "127.0.0.1:9400";
   const protocol = requestHeaders.get("x-forwarded-proto") || (host.startsWith("127.0.0.1") || host.startsWith("localhost") ? "http" : "https");

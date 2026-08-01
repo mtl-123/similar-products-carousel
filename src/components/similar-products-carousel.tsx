@@ -3,67 +3,51 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import type { Locale, Product } from "@/lib/types";
 import { copy, formatCurrency, localizeCategory, localizeProduct } from "@/lib/i18n";
 
 export function SimilarProductsCarousel({ products, locale }: { products: Product[]; locale: Locale }) {
   const t = copy[locale];
   const trackRef = useRef<HTMLDivElement>(null);
-  const [canScrollBack, setCanScrollBack] = useState(false);
-  const [canScrollForward, setCanScrollForward] = useState(products.length > 1);
-
-  const updateControls = useCallback(() => {
-    const track = trackRef.current;
-    if (!track) return;
-    setCanScrollBack(track.scrollLeft > 4);
-    setCanScrollForward(track.scrollLeft + track.clientWidth < track.scrollWidth - 4);
-  }, []);
-
-  useEffect(() => {
-    const track = trackRef.current;
-    if (!track) return;
-    const frame = window.requestAnimationFrame(updateControls);
-    const observer = new ResizeObserver(updateControls);
-    observer.observe(track);
-    track.addEventListener("scroll", updateControls, { passive: true });
-    return () => {
-      window.cancelAnimationFrame(frame);
-      observer.disconnect();
-      track.removeEventListener("scroll", updateControls);
-    };
-  }, [updateControls]);
 
   function move(direction: -1 | 1) {
     const track = trackRef.current;
     if (!track) return;
-    track.scrollBy({ left: direction * Math.max(240, track.clientWidth * 0.82), behavior: "smooth" });
+    const cards = Array.from(track.querySelectorAll<HTMLElement>("[data-related-product-id]"));
+    const origin = cards[0]?.offsetLeft ?? 0;
+    const positions = cards.map((card) => card.offsetLeft - origin);
+    const current = track.scrollLeft;
+    const target = direction > 0
+      ? positions.find((position) => position > current + 8) ?? 0
+      : [...positions].reverse().find((position) => position < current - 8) ?? track.scrollWidth - track.clientWidth;
+    track.scrollTo({ left: target, behavior: "smooth" });
   }
 
   return (
     <section className="border-t bg-white" data-testid="similar-products">
-      <div className="shell py-12 md:py-16">
-        <div className="mb-6 flex items-end justify-between gap-4">
-          <h2 className="text-2xl font-bold md:text-3xl">{t.similarItems}</h2>
-          <div className="flex shrink-0 items-center gap-2">
-            <Link href="/shop" className="mr-1 text-sm font-semibold underline underline-offset-4 hover:text-[var(--accent)]">{t.viewAll}</Link>
-            <button type="button" title={t.previousItems} aria-label={t.previousItems} disabled={!canScrollBack} onClick={() => move(-1)} className="flex size-10 items-center justify-center rounded-full border bg-white disabled:cursor-not-allowed disabled:opacity-30">
-              <ChevronLeft size={20} />
+      <div className="shell min-w-0 py-12 md:py-16">
+        <div className="mb-7 flex min-w-0 flex-col gap-5 sm:flex-row sm:items-end sm:justify-between" data-testid="similar-products-header">
+          <h2 className="text-3xl font-bold md:text-4xl">{t.similarItems}</h2>
+          <div className="flex min-w-0 items-center justify-between gap-3 sm:shrink-0 sm:justify-start" data-testid="similar-products-controls">
+            <Link href="/shop" className="mr-auto whitespace-nowrap text-base font-bold underline decoration-2 underline-offset-[6px] hover:text-[var(--accent)] sm:mr-2">{t.viewAll}</Link>
+            <button type="button" title={t.previousItems} aria-label={t.previousItems} disabled={products.length < 2} onClick={() => move(-1)} className="flex size-14 shrink-0 items-center justify-center rounded-full border border-black/15 bg-white transition hover:border-black hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-black/15 disabled:hover:bg-white disabled:hover:text-black md:size-16">
+              <ChevronLeft size={26} strokeWidth={2.2} />
             </button>
-            <button type="button" title={t.nextItems} aria-label={t.nextItems} disabled={!canScrollForward} onClick={() => move(1)} className="flex size-10 items-center justify-center rounded-full border bg-white disabled:cursor-not-allowed disabled:opacity-30">
-              <ChevronRight size={20} />
+            <button type="button" title={t.nextItems} aria-label={t.nextItems} disabled={products.length < 2} onClick={() => move(1)} className="flex size-14 shrink-0 items-center justify-center rounded-full border border-black/15 bg-white transition hover:border-black hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-black/15 disabled:hover:bg-white disabled:hover:text-black md:size-16">
+              <ChevronRight size={26} strokeWidth={2.2} />
             </button>
           </div>
         </div>
 
-        <div ref={trackRef} className="-mx-3 flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-3 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-testid="similar-products-track">
+        <div ref={trackRef} className="flex w-full snap-x snap-mandatory gap-4 overflow-x-auto overscroll-x-contain scroll-smooth pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-testid="similar-products-track">
           {products.map((product) => {
             const text = localizeProduct(product, locale);
             return (
-              <article key={product.id} className="w-[78%] flex-none snap-start sm:w-[42%] lg:w-[calc((100%-3rem)/4)]" data-related-product-id={product.id}>
+              <article key={product.id} className="w-[82%] min-w-0 flex-none snap-start sm:w-[calc((100%_-_1rem)/2)] lg:w-[calc((100%_-_3rem)/4)]" data-related-product-id={product.id}>
                 <Link href={`/product/${product.slug}`} className="group block">
                   <div className="relative aspect-square overflow-hidden rounded-[6px] bg-[#ecece8]">
-                    <Image src={product.image} alt={text.name} fill sizes="(max-width: 640px) 78vw, (max-width: 1024px) 42vw, 300px" className="object-cover transition duration-500 group-hover:scale-[1.035]" />
+                    <Image src={product.image} alt={text.name} fill unoptimized={product.image.startsWith("/api/uploads/")} sizes="(max-width: 640px) 78vw, (max-width: 1024px) 42vw, 300px" className="object-cover transition duration-500 group-hover:scale-[1.035]" />
                     {product.compare_at && <span className="absolute left-3 top-3 rounded-[3px] bg-[var(--accent)] px-2 py-1 text-[10px] font-bold uppercase text-white">{t.sale}</span>}
                   </div>
                   <div className="pt-4">

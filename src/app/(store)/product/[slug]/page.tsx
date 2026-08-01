@@ -21,7 +21,7 @@ interface ProductDetails {
 
 export default async function ProductPage({ params }: PageProps<"/product/[slug]">) {
   const { slug } = await params;
-  const product = getProduct(slug);
+  const product = await getProduct(slug);
   if (!product || product.status !== "active") notFound();
 
   const locale = await getStoreLocale();
@@ -33,7 +33,7 @@ export default async function ProductPage({ params }: PageProps<"/product/[slug]
   const highlights = details[locale === "zh" ? "highlights_zh" : "highlights_en"] || [];
   const configuredSpecifications = details[locale === "zh" ? "specifications_zh" : "specifications_en"] || {};
   const boxContents = details[locale === "zh" ? "box_contents_zh" : "box_contents_en"] || [];
-  const similarProducts = getSimilarProducts(product);
+  const similarProducts = await getSimilarProducts(product);
   const attributeLabels: Record<string, string> = {
     color: t.attributeColor,
     size: t.attributeSize,
